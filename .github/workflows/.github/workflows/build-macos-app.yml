@@ -1,0 +1,74 @@
+name: Build macOS App
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_dmg:
+        description: Build DMG package
+        required: true
+        type: boolean
+        default: true
+  push:
+    tags:
+      - "mac-v*"
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify tkinter
+        run: python -c "import tkinter; print('tkinter', tkinter.TkVersion)"
+
+      - name: Make scripts executable
+        run: chmod +x build_macos_icon.sh build_mac_app.sh build_mac_dmg.sh
+
+      - name: Build app
+        run: bash build_mac_app.sh
+
+      - name: Locate app bundle
+        id: locate_app
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="$(find "$GITHUB_WORKSPACE/dist" -maxdepth 2 -type d -name '*.app' | head -n 1)"
+          if [[ -z "${app_path:-}" ]]; then
+            echo "No .app bundle found under dist/" >&2
+            exit 1
+          fi
+          echo "app_path=$app_path" >> "$GITHUB_OUTPUT"
+          echo "app_name=$(basename "$app_path")" >> "$GITHUB_OUTPUT"
+
+      - name: Zip app bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f dist/RETEC-CostCalc-V95-Mac.zip
+          ditto -c -k --sequesterRsrc --keepParent "${{ steps.locate_app.outputs.app_path }}" dist/RETEC-CostCalc-V95-Mac.zip
+
+      - name: Build DMG
+        if: github.event_name == 'push' || github.event.inputs.build_dmg == 'true'
+        run: bash build_mac_dmg.sh
+
+      - name: Upload macOS app zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-app-zip
+          path: dist/RETEC-CostCalc-V95-Mac.zip
+          retention-days: 14
+
+      - name: Upload macOS DMG
+        if: github.event_name == 'push' || github.event.inputs.build_dmg == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: dist/RETEC-CostCalc-V95-Mac.dmg
+          retention-days: 14
